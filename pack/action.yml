@@ -1,0 +1,100 @@
+name: Pack MCPB Bundle
+description: Pack an MCPB bundle, optionally for a specific platform target
+
+inputs:
+  target:
+    description: "Platform target suffix (e.g., darwin-arm64). If omitted, creates bundle without platform suffix."
+    required: false
+    default: ""
+  output-dir:
+    description: "Directory to place the bundle"
+    default: "dist"
+  checksum:
+    description: "Generate .sha256 checksum file"
+    default: "true"
+  working-directory:
+    description: "Directory containing manifest.json"
+    default: "."
+
+outputs:
+  bundle-path:
+    description: "Path to the created bundle file"
+    value: ${{ steps.pack.outputs.bundle-path }}
+  bundle-name:
+    description: "Filename of the bundle"
+    value: ${{ steps.pack.outputs.bundle-name }}
+  checksum-path:
+    description: "Path to checksum file (if generated)"
+    value: ${{ steps.pack.outputs.checksum-path }}
+
+runs:
+  using: composite
+  steps:
+    - name: Validate tool-cli is installed
+      shell: bash
+      run: |
+        if ! command -v tool &>/dev/null; then
+          echo "::error::tool-cli is not installed. Use zerocore-ai/tool-action/setup first."
+          exit 1
+        fi
+
+    - name: Pack bundle
+      id: pack
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        set -euo pipefail
+
+        # Clean any existing bundles
+        rm -f ./*.mcpb ./*.mcpbx
+
+        # Pack the bundle
+        tool pack
+
+        # Find the created bundle
+        shopt -s nullglob
+        bundles=(./*.mcpb ./*.mcpbx)
+        if [ "${#bundles[@]}" -eq 0 ]; then
+          echo "::error::No bundle was created"
+          exit 1
+        elif [ "${#bundles[@]}" -gt 1 ]; then
+          echo "::error::Expected 1 bundle, found ${#bundles[@]}"
+          exit 1
+        fi
+
+        BUNDLE="${bundles[0]}"
+        FILENAME="$(basename "$BUNDLE")"
+        EXT="${FILENAME##*.}"
+        BASE="${FILENAME%.*}"
+
+        # Add target suffix if provided
+        if [ -n "${{ inputs.target }}" ]; then
+          NEW_FILENAME="${BASE}-${{ inputs.target }}.${EXT}"
+        else
+          NEW_FILENAME="$FILENAME"
+        fi
+
+        # Create output directory and move bundle
+        mkdir -p "${{ inputs.output-dir }}"
+        OUT_PATH="${{ inputs.output-dir }}/${NEW_FILENAME}"
+        mv "$BUNDLE" "$OUT_PATH"
+
+        echo "bundle-path=$OUT_PATH" >> "$GITHUB_OUTPUT"
+        echo "bundle-name=$NEW_FILENAME" >> "$GITHUB_OUTPUT"
+        echo "Created: $OUT_PATH"
+
+        # Generate checksum if requested
+        if [ "${{ inputs.checksum }}" = "true" ]; then
+          CHECKSUM_PATH="${OUT_PATH}.sha256"
+          node -e "
+            const fs = require('fs');
+            const crypto = require('crypto');
+            const path = require('path');
+            const p = process.argv[1];
+            const d = fs.readFileSync(p);
+            const h = crypto.createHash('sha256').update(d).digest('hex');
+            fs.writeFileSync(p + '.sha256', h + '  ' + path.basename(p) + '\n');
+          " "$OUT_PATH"
+          echo "checksum-path=$CHECKSUM_PATH" >> "$GITHUB_OUTPUT"
+          echo "Checksum: $CHECKSUM_PATH"
+        fi
