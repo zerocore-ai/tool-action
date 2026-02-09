@@ -1,0 +1,49 @@
+name: Setup tool-cli
+description: Install tool-cli for building and publishing MCPB bundles
+
+inputs:
+  version:
+    description: "tool-cli version to install"
+    default: "latest"
+  fallback-to-source:
+    description: "Build from source if prebuilt binary unavailable"
+    default: "true"
+
+outputs:
+  version:
+    description: "Installed tool-cli version"
+    value: ${{ steps.version.outputs.version }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install tool-cli (prebuilt)
+      id: prebuilt
+      continue-on-error: true
+      shell: bash
+      run: |
+        curl -fsSL "https://raw.githubusercontent.com/zerocore-ai/tool-cli/main/install.sh" | sh -s -- \
+          --version="${{ inputs.version }}" \
+          --prefix="$HOME/.local" \
+          --force \
+          --no-modify-path
+        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+    - name: Setup Rust (fallback)
+      if: steps.prebuilt.outcome != 'success' && inputs.fallback-to-source == 'true'
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Install tool-cli from source (fallback)
+      if: steps.prebuilt.outcome != 'success' && inputs.fallback-to-source == 'true'
+      shell: bash
+      run: |
+        cargo install --git "https://github.com/zerocore-ai/tool-cli" --locked --force
+        echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+    - name: Verify installation
+      id: version
+      shell: bash
+      run: |
+        VERSION="$(tool --version)"
+        echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+        echo "Installed: $VERSION"

@@ -1,0 +1,126 @@
+name: Publish MCPB Bundles
+description: Publish multi-platform MCPB bundles to tool.store registry
+
+inputs:
+  bundles:
+    description: "Glob pattern for bundle files (space-separated for multiple patterns)"
+    default: "dist/*.mcpb dist/*.mcpbx"
+  dry-run:
+    description: "Validate without uploading"
+    default: "false"
+  working-directory:
+    description: "Directory containing manifest.json"
+    default: "."
+
+outputs:
+  published:
+    description: "Whether publish succeeded"
+    value: ${{ steps.publish.outputs.published }}
+
+runs:
+  using: composite
+  steps:
+    - name: Validate tool-cli is installed
+      shell: bash
+      run: |
+        if ! command -v tool &>/dev/null; then
+          echo "::error::tool-cli is not installed. Use zerocore-ai/tool-action/setup first."
+          exit 1
+        fi
+
+    - name: Validate registry token
+      if: inputs.dry-run != 'true'
+      shell: bash
+      run: |
+        if [ -z "$TOOL_REGISTRY_TOKEN" ]; then
+          echo "::error::TOOL_REGISTRY_TOKEN environment variable is required for publishing"
+          exit 1
+        fi
+
+    - name: Publish bundles
+      id: publish
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        set -euo pipefail
+
+        # Find all bundles matching the patterns (space-separated)
+        shopt -s nullglob
+        BUNDLES=()
+        for pattern in ${{ inputs.bundles }}; do
+          BUNDLES+=($pattern)
+        done
+
+        if [ "${#BUNDLES[@]}" -eq 0 ]; then
+          echo "::error::No bundles found matching patterns: ${{ inputs.bundles }}"
+          exit 1
+        fi
+
+        echo "Found ${#BUNDLES[@]} bundle(s):"
+        printf '  %s\n' "${BUNDLES[@]}"
+
+        # Build publish arguments by mapping filenames to platform flags
+        ARGS="--multi-platform"
+
+        DARWIN_ARM64=""
+        DARWIN_X64=""
+        LINUX_ARM64=""
+        LINUX_X64=""
+        WIN32_ARM64=""
+        WIN32_X64=""
+
+        for f in "${BUNDLES[@]}"; do
+          BASENAME="$(basename "$f")"
+          case "$BASENAME" in
+            *-darwin-arm64.mcpb|*-darwin-arm64.mcpbx)
+              DARWIN_ARM64="$f" ;;
+            *-darwin-x86_64.mcpb|*-darwin-x86_64.mcpbx|*-darwin-x64.mcpb|*-darwin-x64.mcpbx)
+              DARWIN_X64="$f" ;;
+            *-linux-arm64.mcpb|*-linux-arm64.mcpbx)
+              LINUX_ARM64="$f" ;;
+            *-linux-x86_64.mcpb|*-linux-x86_64.mcpbx|*-linux-x64.mcpb|*-linux-x64.mcpbx)
+              LINUX_X64="$f" ;;
+            *-win32-arm64.mcpb|*-win32-arm64.mcpbx)
+              WIN32_ARM64="$f" ;;
+            *-win32-x86_64.mcpb|*-win32-x86_64.mcpbx|*-win32-x64.mcpb|*-win32-x64.mcpbx)
+              WIN32_X64="$f" ;;
+            *)
+              echo "::warning::Unknown platform in filename: $BASENAME"
+              ;;
+          esac
+        done
+
+        # Build the command arguments
+        [ -n "$DARWIN_ARM64" ] && ARGS="$ARGS --darwin-arm64 $DARWIN_ARM64"
+        [ -n "$DARWIN_X64" ] && ARGS="$ARGS --darwin-x64 $DARWIN_X64"
+        [ -n "$LINUX_ARM64" ] && ARGS="$ARGS --linux-arm64 $LINUX_ARM64"
+        [ -n "$LINUX_X64" ] && ARGS="$ARGS --linux-x64 $LINUX_X64"
+        [ -n "$WIN32_ARM64" ] && ARGS="$ARGS --win32-arm64 $WIN32_ARM64"
+        [ -n "$WIN32_X64" ] && ARGS="$ARGS --win32-x64 $WIN32_X64"
+
+        # Check we found at least one platform bundle
+        if [ -z "$DARWIN_ARM64" ] && [ -z "$DARWIN_X64" ] && \
+           [ -z "$LINUX_ARM64" ] && [ -z "$LINUX_X64" ] && \
+           [ -z "$WIN32_ARM64" ] && [ -z "$WIN32_X64" ]; then
+          echo "::error::No platform-specific bundles found. Bundles must have platform suffix (e.g., -darwin-arm64.mcpb)"
+          exit 1
+        fi
+
+        # Add dry-run flag if requested
+        if [ "${{ inputs.dry-run }}" = "true" ]; then
+          ARGS="$ARGS --dry-run"
+        fi
+
+        echo "Platform mappings:"
+        [ -n "$DARWIN_ARM64" ] && echo "  darwin-arm64: $(basename "$DARWIN_ARM64")"
+        [ -n "$DARWIN_X64" ] && echo "  darwin-x64:   $(basename "$DARWIN_X64")"
+        [ -n "$LINUX_ARM64" ] && echo "  linux-arm64:  $(basename "$LINUX_ARM64")"
+        [ -n "$LINUX_X64" ] && echo "  linux-x64:    $(basename "$LINUX_X64")"
+        [ -n "$WIN32_ARM64" ] && echo "  win32-arm64:  $(basename "$WIN32_ARM64")"
+        [ -n "$WIN32_X64" ] && echo "  win32-x64:    $(basename "$WIN32_X64")"
+
+        echo ""
+        echo "Running: tool publish $ARGS"
+        tool publish $ARGS
+
+        echo "published=true" >> "$GITHUB_OUTPUT"
