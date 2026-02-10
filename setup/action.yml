@@ -17,24 +17,50 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: Install tool-cli (prebuilt)
-      id: prebuilt
+    # Unix (macOS / Linux)
+    - name: Install tool-cli (prebuilt Unix)
+      id: prebuilt-unix
+      if: runner.os != 'Windows'
       continue-on-error: true
       shell: bash
       run: |
-        curl -fsSL "https://raw.githubusercontent.com/zerocore-ai/tool-cli/main/install.sh" | sh -s -- \
+        curl -fsSL "https://cli.tool.store" | sh -s -- \
           --version="${{ inputs.version }}" \
           --prefix="$HOME/.local" \
           --force \
           --no-modify-path
         echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
+    # Windows
+    - name: Install tool-cli (prebuilt Windows)
+      id: prebuilt-windows
+      if: runner.os == 'Windows'
+      continue-on-error: true
+      shell: pwsh
+      run: |
+        $script = irm https://cli.tool.store/windows
+        $version = "${{ inputs.version }}"
+        if ($version -eq "latest") {
+          & ([scriptblock]::Create($script)) -NoModifyPath -Force
+        } else {
+          & ([scriptblock]::Create($script)) -Version $version -NoModifyPath -Force
+        }
+        "$env:LOCALAPPDATA\Programs\tool\bin" >> $env:GITHUB_PATH
+
     - name: Setup Rust (fallback)
-      if: steps.prebuilt.outcome != 'success' && inputs.fallback-to-source == 'true'
+      if: |
+        inputs.fallback-to-source == 'true' && (
+          (runner.os != 'Windows' && steps.prebuilt-unix.outcome != 'success') ||
+          (runner.os == 'Windows' && steps.prebuilt-windows.outcome != 'success')
+        )
       uses: dtolnay/rust-toolchain@stable
 
     - name: Install tool-cli from source (fallback)
-      if: steps.prebuilt.outcome != 'success' && inputs.fallback-to-source == 'true'
+      if: |
+        inputs.fallback-to-source == 'true' && (
+          (runner.os != 'Windows' && steps.prebuilt-unix.outcome != 'success') ||
+          (runner.os == 'Windows' && steps.prebuilt-windows.outcome != 'success')
+        )
       shell: bash
       run: |
         cargo install --git "https://github.com/zerocore-ai/tool-cli" --locked --force
