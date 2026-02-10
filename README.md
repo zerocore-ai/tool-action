@@ -76,7 +76,7 @@ jobs:
 
 ## setup
 
-Install tool-cli binary.
+Install tool-cli binary. Works on all platforms (macOS, Linux, Windows).
 
 ```yaml
 - uses: zerocore-ai/tool-action/setup@v1
