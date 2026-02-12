@@ -76,27 +76,29 @@ jobs:
 
 ## setup
 
-Install tool-cli binary. Works on all platforms (macOS, Linux, Windows).
+Install tool-cli binary. Works on all platforms (macOS, Linux, Windows). Binaries are cached for faster subsequent runs.
 
 ```yaml
 - uses: zerocore-ai/tool-action/setup@v1
   with:
-    version: latest              # tool-cli version (default: latest)
-    fallback-to-source: "true"   # Build from source if prebuilt unavailable
+    version: latest    # Git tag or 'latest' for main branch HEAD
 ```
 
 ### Inputs
 
 | Input | Default | Description |
 |-------|---------|-------------|
-| `version` | `latest` | tool-cli version to install |
-| `fallback-to-source` | `true` | Build from source if prebuilt binary unavailable |
+| `version` | `latest` | Git tag to install, or `latest` for main branch HEAD |
 
 ### Outputs
 
 | Output | Description |
 |--------|-------------|
 | `version` | Installed tool-cli version string |
+
+### Caching
+
+The action caches the compiled binary based on OS, architecture, and version. Cache key format: `tool-cli-{os}-{arch}-{version}`. When using `version: latest`, the cache persists until manually cleared or the cache expires.
 
 ---
 
