@@ -3,11 +3,8 @@ description: Install tool-cli for building and publishing MCPB bundles
 
 inputs:
   version:
-    description: "tool-cli version to install"
+    description: "tool-cli git tag to install (use 'latest' for main branch HEAD)"
     default: "latest"
-  fallback-to-source:
-    description: "Build from source if prebuilt binary unavailable"
-    default: "true"
 
 outputs:
   version:
@@ -17,54 +14,32 @@ outputs:
 runs:
   using: composite
   steps:
-    # Unix (macOS / Linux)
-    - name: Install tool-cli (prebuilt Unix)
-      id: prebuilt-unix
-      if: runner.os != 'Windows'
-      continue-on-error: true
-      shell: bash
-      run: |
-        curl -fsSL "https://cli.tool.store" | sh -s -- \
-          --version="${{ inputs.version }}" \
-          --prefix="$HOME/.local" \
-          --force \
-          --no-modify-path
-        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+    - name: Restore cached tool-cli
+      id: cache
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/bin/tool
+          ~/.cargo/bin/tool.exe
+        key: tool-cli-${{ runner.os }}-${{ runner.arch }}-${{ inputs.version }}
 
-    # Windows
-    - name: Install tool-cli (prebuilt Windows)
-      id: prebuilt-windows
-      if: runner.os == 'Windows'
-      continue-on-error: true
-      shell: pwsh
-      run: |
-        $script = irm https://cli.tool.store/windows
-        $version = "${{ inputs.version }}"
-        if ($version -eq "latest") {
-          & ([scriptblock]::Create($script)) -NoModifyPath -Force
-        } else {
-          & ([scriptblock]::Create($script)) -Version $version -NoModifyPath -Force
-        }
-        "$env:LOCALAPPDATA\Programs\tool\bin" >> $env:GITHUB_PATH
-
-    - name: Setup Rust (fallback)
-      if: |
-        inputs.fallback-to-source == 'true' && (
-          (runner.os != 'Windows' && steps.prebuilt-unix.outcome != 'success') ||
-          (runner.os == 'Windows' && steps.prebuilt-windows.outcome != 'success')
-        )
+    - name: Setup Rust
+      if: steps.cache.outputs.cache-hit != 'true'
       uses: dtolnay/rust-toolchain@stable
 
-    - name: Install tool-cli from source (fallback)
-      if: |
-        inputs.fallback-to-source == 'true' && (
-          (runner.os != 'Windows' && steps.prebuilt-unix.outcome != 'success') ||
-          (runner.os == 'Windows' && steps.prebuilt-windows.outcome != 'success')
-        )
+    - name: Install tool-cli
+      if: steps.cache.outputs.cache-hit != 'true'
       shell: bash
       run: |
-        cargo install --git "https://github.com/zerocore-ai/tool-cli" --locked --force
-        echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+        if [ "${{ inputs.version }}" = "latest" ]; then
+          cargo install --git "https://github.com/zerocore-ai/tool-cli" --locked --force
+        else
+          cargo install --git "https://github.com/zerocore-ai/tool-cli" --tag "${{ inputs.version }}" --locked --force
+        fi
+
+    - name: Add to PATH
+      shell: bash
+      run: echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
     - name: Verify installation
       id: version
